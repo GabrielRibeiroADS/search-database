@@ -3,9 +3,9 @@ import { NextResponse } from "next/server";
 import { TranscriptChunkSchema } from "@/lib/types";
 import { MOCK_TRANSCRIPTS } from "@/lib/mock-data";
 
-export async function GET(req: Request, ctx: { params: { id: string } }) {
+export async function GET(  req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const { id } = ctx.params;
+    const { id } = await params;
     const url = new URL(req.url);
     const offset = parseInt(url.searchParams.get("offset") ?? "0", 10);
     const limit = parseInt(url.searchParams.get("limit") ?? "50000", 10);

@@ -358,7 +358,7 @@ export default function HomePage() {
             }`}
         >
           <ScrollArea
-            className={`${isTwoPane ? "md:col-span-1 border-r" : "col-span-1"
+            className={`${isTwoPane ? "md:col-span-2 border-r" : "col-span-1"
               } min-h-0 h-full`}
           >
             <div className="p-4 space-y-4">
@@ -472,7 +472,7 @@ export default function HomePage() {
 
           {/* O painel direito SÓ é renderizado se houver uma transcrição selecionada */}
           {selectedTranscript && (
-            <ScrollArea className="md:col-span-2 min-h-0 h-full">
+            <ScrollArea className="md:col-span-1 min-h-0 h-full">
               <div className="p-6">
                 {isTranscriptLoading && (
                   <div className="text-center p-10">
