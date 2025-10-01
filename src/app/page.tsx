@@ -51,6 +51,36 @@ import {
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 
+function stripDiacritics(s: string) {
+  return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
+// Insere <mark> no texto original, ignorando acentos e sem escapar HTML (igual à prévia)
+function highlightFull(text: string, query: string): string {
+  const q = query.trim();
+  if (!q) return text;
+
+  const tn = stripDiacritics(text).toLowerCase();
+  const qn = stripDiacritics(q).toLowerCase();
+
+  let out = "";
+  let i = 0;
+  let last = 0;
+
+  while (true) {
+    const idx = tn.indexOf(qn, i);
+    if (idx === -1) break;
+
+    out += text.slice(last, idx);
+    out += "<mark>" + text.slice(idx, idx + qn.length) + "</mark>";
+
+    i = idx + qn.length;
+    last = i;
+  }
+  out += text.slice(last);
+  return out;
+}
+
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "";
 
 // Tipo para o estado da transcrição selecionada
@@ -488,9 +518,12 @@ export default function HomePage() {
                     </CardHeader>
                     <Separator className="my-4" />
                     <CardContent>
-                      <div className="prose prose-slate dark:prose-invert max-w-none whitespace-pre-wrap">
-                        {selectedTranscript.content}
-                      </div>
+                      <div
+                        className="prose prose-slate dark:prose-invert max-w-none whitespace-pre-wrap"
+                        dangerouslySetInnerHTML={{
+                          __html: highlightFull(selectedTranscript.content, query),
+                        }}
+                      />
                       <div ref={lastChunkElementRef} className="h-10" />
                       {isMoreContentLoading && (
                         <div className="text-center py-4">

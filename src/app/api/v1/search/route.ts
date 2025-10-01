@@ -105,8 +105,12 @@ export async function POST(req: Request) {
             // Garantir shape conforme o schema
             const safe = SearchResponseSchema.parse(payload);
             return NextResponse.json(safe);
-      } catch (err: any) {
-            const message = err?.message ?? "Erro na busca mock.";
-            return NextResponse.json({ message }, { status: 400 });
+      } catch (err) {
+            if (err instanceof SyntaxError) {
+                  const message = err?.message ?? "Erro na busca mock.";
+                  return NextResponse.json({ message }, { status: 400 });
+            } else {
+                  return NextResponse.json({ message: "Erro desconhecido." }, { status: 500 });
+            }
       }
 }

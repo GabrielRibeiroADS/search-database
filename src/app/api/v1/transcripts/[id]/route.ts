@@ -33,8 +33,12 @@ export async function GET(  req: Request, { params }: { params: Promise<{ id: st
 
     const safe = TranscriptChunkSchema.parse(payload);
     return NextResponse.json(safe);
-  } catch (err: any) {
-    const message = err?.message ?? "Erro ao obter transcrição mock.";
-    return NextResponse.json({ message }, { status: 400 });
+  } catch (err) {
+    if (err instanceof SyntaxError) {
+      const message = err?.message ?? "Erro ao obter transcrição mock.";
+      return NextResponse.json({ message }, { status: 400 });
+    } else {
+      return NextResponse.json({ message: "Erro desconhecido." }, { status: 500 });
+    }
   }
 }
