@@ -9,7 +9,7 @@ import type {
 } from "@/lib/types";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { Calendar as CalendarIcon, Loader2 } from "lucide-react";
+import { Calendar as CalendarIcon, Loader2, RotateCcw, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // Importando todos os componentes Shadcn/ui necessários
@@ -50,6 +50,45 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
+import ReactMarkdown from 'react-markdown';
+import rehypeRaw from 'rehype-raw';
+import remarkGfm from 'remark-gfm';
+
+function extractContentByTag(text: string, tagName: string): string | null {
+  // A flag 's' permite que '.' capture quebras de linha
+  const regex = new RegExp(`<${tagName}>(.*?)</${tagName}>`, "s");
+  const match = text.match(regex);
+  return match ? match[1].trim() : null;
+}
+
+/**
+ * Corrige strings que contêm "\\n" literal para um caractere de quebra de linha real.
+ */
+function unescapeString(str: string | null): string {
+  if (!str) return "";
+  return str.replace(/\\n/g, '\n');
+}
+
+// TIPO ATUALIZADO COM TODOS OS CAMPOS QUE VOCÊ QUER EXIBIR
+type ParsedTranscript = {
+  channelTitle: string | null;
+  youtubeId: string | null;
+  videoId: string | null;
+  chunkId: string | null;
+  startTs: string | null;
+  endTs: string | null;
+  content: string | null;
+};
+
+type CachedTranscript = {
+  id: string;
+  title: string;
+  content: string;
+  nextOffset: number | null;
+  matchPositions: number[];
+  parsedData: ParsedTranscript | null;
+};
+
 
 function stripDiacritics(s: string) {
   return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -92,6 +131,8 @@ type SelectedTranscriptState = {
   matchPositions: number[];
 };
 
+
+
 export default function HomePage() {
   // Estados da Busca
   const [query, setQuery] = useState("");
@@ -104,9 +145,93 @@ export default function HomePage() {
     null
   );
 
+  const handleCloseTranscript = () => {
+    setSelectedTranscript(null);
+    setParsedTranscript(null);
+  };
+
+  const handleRefreshTranscript = async () => {
+  if (!selectedTranscript) return;
+  
+  const transcriptId = selectedTranscript.id;
+  const transcriptTitle = selectedTranscript.title;
+  
+  // Remove do cache
+  transcriptCache.current.delete(transcriptId);
+  console.log('🔄 Cache limpo para:', transcriptId);
+  
+  // Ativa o loading mas mantém a transcrição aberta
+  setIsTranscriptLoading(true);
+  setError(null);
+  
+  try {
+    const apiUrl = `${API_BASE_URL}/api/v1/transcripts/${transcriptId}?offset=0&limit=50000`;
+    const response = await fetch(apiUrl);
+    if (!response.ok) throw new Error("Falha ao recarregar a transcrição.");
+
+    const chunk: TranscriptChunk = await response.json();
+    const rawText = chunk.text;
+
+    // ETAPA DE PARSING
+    const metadataBlock = extractContentByTag(rawText, "metadata");
+    const channelBlock = metadataBlock ? extractContentByTag(metadataBlock, "channel") : null;
+    
+    const channelTitle = channelBlock ? extractContentByTag(channelBlock, "title") : null;
+    const youtubeId = channelBlock ? extractContentByTag(channelBlock, "youtube_id") : null;
+    
+    const videoId = metadataBlock ? extractContentByTag(metadataBlock, "video_id") : null;
+    const chunkId = metadataBlock ? extractContentByTag(metadataBlock, "chunk_id") : null;
+    const startTs = metadataBlock ? extractContentByTag(metadataBlock, "start_ts") : null;
+    const endTs = metadataBlock ? extractContentByTag(metadataBlock, "end_ts") : null;
+
+    const rawContent = extractContentByTag(rawText, "content");
+    const cleanedContent = unescapeString(rawContent);
+
+    const parsedData: ParsedTranscript = {
+      channelTitle,
+      youtubeId,
+      videoId,
+      chunkId,
+      startTs,
+      endTs,
+      content: cleanedContent,
+    };
+
+    const transcriptData: CachedTranscript = {
+      id: chunk.id,
+      title: transcriptTitle,
+      content: cleanedContent,
+      nextOffset: chunk.nextOffset ?? null,
+      matchPositions: chunk.matchPositions,
+      parsedData,
+    };
+
+    // Salva no cache novamente
+    transcriptCache.current.set(transcriptId, transcriptData);
+    console.log('💾 Cache atualizado:', transcriptId);
+
+    setParsedTranscript(parsedData);
+    setSelectedTranscript(transcriptData);
+
+  } catch (err) {
+    if (err instanceof Error) {
+      setError(err.message);
+    } else {
+      setError("Ocorreu um erro desconhecido ao recarregar a transcrição.");
+    }
+  } finally {
+    setIsTranscriptLoading(false);
+  }
+};
+
   // Estados da Transcrição Selecionada
   const [selectedTranscript, setSelectedTranscript] =
     useState<SelectedTranscriptState | null>(null);
+
+  // Cache de transcrições
+  const transcriptCache = useRef<Map<string, CachedTranscript>>(new Map());
+
+  const [parsedTranscript, setParsedTranscript] = useState<ParsedTranscript | null>(null);
 
   // Estados de Carregamento e Erro
   const [isSearching, setIsSearching] = useState(false);
@@ -184,15 +309,27 @@ export default function HomePage() {
   };
 
   const handleSelectTranscript = async (transcript: SearchResultItem) => {
+    // Se clicar no mesmo item, fecha
     if (selectedTranscript?.id === transcript.id) {
-      // Permite des-selecionar ao clicar no mesmo item
       setSelectedTranscript(null);
+      setParsedTranscript(null);
       return;
     }
 
+    // Verifica se está no cache
+    const cached = transcriptCache.current.get(transcript.id);
+    if (cached) {
+      console.log('📦 Carregando do cache:', transcript.id);
+      setSelectedTranscript(cached);
+      setParsedTranscript(cached.parsedData);
+      return;
+    }
+
+    // Se não está no cache, busca da API
     setIsTranscriptLoading(true);
     setError(null);
     setSelectedTranscript(null);
+    setParsedTranscript(null);
 
     try {
       const apiUrl = `${API_BASE_URL}/api/v1/transcripts/${transcript.id}?offset=0&limit=50000`;
@@ -200,13 +337,49 @@ export default function HomePage() {
       if (!response.ok) throw new Error("Falha ao carregar a transcrição.");
 
       const chunk: TranscriptChunk = await response.json();
-      setSelectedTranscript({
+      const rawText = chunk.text;
+
+      // ETAPA DE PARSING
+      const metadataBlock = extractContentByTag(rawText, "metadata");
+      const channelBlock = metadataBlock ? extractContentByTag(metadataBlock, "channel") : null;
+
+      const channelTitle = channelBlock ? extractContentByTag(channelBlock, "title") : null;
+      const youtubeId = channelBlock ? extractContentByTag(channelBlock, "youtube_id") : null;
+
+      const videoId = metadataBlock ? extractContentByTag(metadataBlock, "video_id") : null;
+      const chunkId = metadataBlock ? extractContentByTag(metadataBlock, "chunk_id") : null;
+      const startTs = metadataBlock ? extractContentByTag(metadataBlock, "start_ts") : null;
+      const endTs = metadataBlock ? extractContentByTag(metadataBlock, "end_ts") : null;
+
+      const rawContent = extractContentByTag(rawText, "content");
+      const cleanedContent = unescapeString(rawContent);
+
+      const parsedData: ParsedTranscript = {
+        channelTitle,
+        youtubeId,
+        videoId,
+        chunkId,
+        startTs,
+        endTs,
+        content: cleanedContent,
+      };
+
+      const transcriptData: CachedTranscript = {
         id: chunk.id,
         title: transcript.title,
-        content: chunk.text,
+        content: cleanedContent,
         nextOffset: chunk.nextOffset ?? null,
         matchPositions: chunk.matchPositions,
-      });
+        parsedData,
+      };
+
+      // Salva no cache
+      transcriptCache.current.set(transcript.id, transcriptData);
+      console.log('💾 Salvando no cache:', transcript.id);
+
+      setParsedTranscript(parsedData);
+      setSelectedTranscript(transcriptData);
+
     } catch (err) {
       if (err instanceof Error) {
         setError(err.message);
@@ -509,21 +682,93 @@ export default function HomePage() {
                     <Loader2 className="h-8 w-8 animate-spin mx-auto" />
                   </div>
                 )}
-                {selectedTranscript && (
+
+                {/* Usamos o estado 'parsedTranscript' para renderizar os dados limpos */}
+                {parsedTranscript && selectedTranscript && (
                   <Card>
-                    <CardHeader>
+                    <CardHeader className="flex flex-row items-start justify-between pb-2 space-y-0">
                       <CardTitle className="text-2xl">
                         {selectedTranscript.title}
                       </CardTitle>
+                      <div>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 rounded-full hover:bg-primary/10"
+                          onClick={handleRefreshTranscript}
+                          aria-label="Recarregar transcrição"
+                          disabled={isTranscriptLoading}
+                        >
+                          <RotateCcw className={`h-4 w-4 ${isTranscriptLoading ? 'animate-spin' : ''}`} />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 rounded-full hover:bg-destructive/10 shrink-0 -mt-1"
+                          onClick={handleCloseTranscript}
+                          aria-label="Fechar transcrição"
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
+
                     </CardHeader>
-                    <Separator className="my-4" />
                     <CardContent>
-                      <div
-                        className="prose prose-slate dark:prose-invert max-w-none whitespace-pre-wrap"
-                        dangerouslySetInnerHTML={{
-                          __html: highlightFull(selectedTranscript.content, query),
-                        }}
-                      />
+                      {/* SEÇÃO PARA EXIBIR TODOS OS METADADOS */}
+                      <div className="space-y-2 text-sm text-muted-foreground mb-6">
+                        <h3 className="font-semibold text-foreground">Metadados Extraídos</h3>
+                        {parsedTranscript.channelTitle && (
+                          <div className="flex justify-between">
+                            <span>Canal:</span>
+                            <a href={`https://www.youtube.com/channel/${parsedTranscript.youtubeId}`} target="_blank" rel="noopener noreferrer" className="font-mono text-blue-500 hover:underline">{parsedTranscript.channelTitle}</a>
+                          </div>
+                        )}
+                        {parsedTranscript.youtubeId && (
+                          <div className="flex justify-between">
+                            <span>ID do Canal:</span>
+                            <span className="font-mono">{parsedTranscript.youtubeId}</span>
+                          </div>
+                        )}
+                        {parsedTranscript.videoId && (
+                          <div className="flex justify-between">
+                            <span>ID do Vídeo:</span>
+                            <a href={`https://www.youtube.com/watch?v=${parsedTranscript.videoId}`} target="_blank" rel="noopener noreferrer" className="font-mono text-blue-500 hover:underline">{parsedTranscript.videoId}</a>
+                          </div>
+                        )}
+                        {parsedTranscript.chunkId && (
+                          <div className="flex justify-between">
+                            <span>ID do Chunk:</span>
+                            <span className="font-mono">{parsedTranscript.chunkId}</span>
+                          </div>
+                        )}
+                        {parsedTranscript.startTs && (
+                          <div className="flex justify-between">
+                            <span>Timestamp Inicial:</span>
+                            <span className="font-mono">{parsedTranscript.startTs}</span>
+                          </div>
+                        )}
+                        {parsedTranscript.endTs && (
+                          <div className="flex justify-between">
+                            <span>Timestamp Final:</span>
+                            <span className="font-mono">{parsedTranscript.endTs}</span>
+                          </div>
+                        )}
+                      </div>
+
+                      <Separator className="my-4" />
+
+                      {/* SEÇÃO PARA A TRANSCRIÇÃO FORMATADA */}
+                      <div className="prose prose-slate dark:prose-invert max-w-none whitespace-pre-wrap">
+                        <ReactMarkdown
+                          rehypePlugins={[rehypeRaw]}
+                          remarkPlugins={[remarkGfm]}
+                          breaks={true}
+                        >
+                          {highlightFull(parsedTranscript.content || "", query)}
+                        </ReactMarkdown>
+                      </div>
+
+                      {/* Lógica de scroll infinito */}
                       <div ref={lastChunkElementRef} className="h-10" />
                       {isMoreContentLoading && (
                         <div className="text-center py-4">
