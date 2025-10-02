@@ -9,6 +9,7 @@ import { Calendar as CalendarIcon, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import Image from "next/image";
 import {
   Card,
   CardContent,
@@ -63,6 +64,18 @@ export default function SearchPage() {
     <div className="min-h-screen bg-background text-foreground flex items-center justify-center p-4">
       <Card className="w-full max-w-3xl">
         <CardHeader className="text-center">
+          {/* Imagem do Miorinator */}
+          <div className="flex justify-center mb-6">
+            <Image
+              src="/miorinator2.png"
+              alt="Miorinator"
+              width={500}
+              height={500}
+              className="rounded-lg object-cover"
+              priority
+            />
+          </div>
+          
           <CardTitle className="text-4xl font-bold mb-2">
             Buscador de Transcrições
           </CardTitle>
